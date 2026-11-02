@@ -1,5 +1,7 @@
 # フロントエンドエンジニアのためのフルスタック開発入門
 
+<img width="280" src="https://github.com/user-attachments/assets/d8451596-cc99-468c-9d4e-259241f8a028" /><br>
+
 書籍『フロントエンドエンジニアのためのフルスタック開発入門』のサンプルコードです。
 
 記事の投稿と閲覧ができる小さなブログサービス「mini-blog」を、本のとおりに作り、AWS で動かして確かめたものです。本の第3部〜第5部で作るコードの、完成した形が入っています。
@@ -7,6 +9,8 @@
 ##  シーケンス図 
 
 書籍に付属するシーケンス図です。学習の際、データの流れを確認しながら学ぶと分かりやすいので、ご活用ください。
+
+<img width="360" src="https://github.com/user-attachments/assets/16e3df53-afe1-437a-b4a6-f5b0862b60af" />
 
 - [mini-blog-diagrams-a4.pdf](docs/mini-blog-diagrams-a4.pdf)
 
