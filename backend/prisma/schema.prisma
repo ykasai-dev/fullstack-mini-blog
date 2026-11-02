@@ -1,0 +1,25 @@
+generator client {
+  provider = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum PostStatus {
+  draft
+  published
+}
+
+model Post {
+  id        Int        @id @default(autoincrement()) // 主キー。1, 2, 3… と自動で採番する
+  title     String // ? がないので必須
+  body      String
+  status    PostStatus @default(draft) // 初期値は下書き
+  imageKey  String? // 画像の S3 のキー（画像がない記事は null）
+  createdAt DateTime   @default(now()) // 作成した時刻
+  updatedAt DateTime   @updatedAt // 更新のたびに Prisma が時刻を入れる
+}

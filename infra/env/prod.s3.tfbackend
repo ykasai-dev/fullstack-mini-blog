@@ -1,0 +1,5 @@
+bucket       = "mini-blog-tfstate-（アカウントID）" # 4-1-3 で作成したバケット（dev と共通）
+key          = "prod/terraform.tfstate"           # dev とは別のファイルにする
+region       = "us-east-1"
+encrypt      = true
+use_lockfile = true

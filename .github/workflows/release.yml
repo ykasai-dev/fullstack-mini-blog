@@ -1,0 +1,21 @@
+name: release
+
+on:
+  workflow_dispatch: # 「Actions」タブの「Run workflow」で、手動で実行する
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # main の最新のコミットを、API・画面の両方とも prod にデプロイする
+  deploy-api:
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      env: prod
+      app: api
+  deploy-app:
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      env: prod
+      app: app

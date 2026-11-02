@@ -1,0 +1,50 @@
+name: mini-blog # プロジェクトの名前（同じフォルダ名の別プロジェクトとぶつからないようにする）
+
+services:
+  db:
+    image: postgres:17  # AWS の RDS も同じメジャーバージョン（17）にそろえる
+    environment:
+      # 手元の PC だけで使う値。AWS では使わない
+      POSTGRES_USER: blog
+      POSTGRES_PASSWORD: blog
+      POSTGRES_DB: blog
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data  # データをボリュームに保存する（コンテナを消しても残る）
+
+  backend:
+    build: ./backend  # backend/Dockerfile でイメージを作る
+    # backend/.env の値を、コンテナの環境変数として渡す（.env はイメージには入れていない）
+    env_file: ./backend/.env
+    environment:
+      # .env の DATABASE_URL（localhost）を上書きする
+      # コンテナの中の localhost はそのコンテナ自身なので、db のコンテナはサービス名 db で指定する
+      DATABASE_URL: postgresql://blog:blog@db:5432/blog?schema=public
+    volumes:
+      # Mac の AWS の設定とログイン情報を、読み取り専用でコンテナに渡す（→ 4-2-5）
+      # コンテナは root で動くので、/root/.aws に置く
+      - ~/.aws:/root/.aws:ro
+    ports:
+      - "3001:3001"
+    depends_on:
+      - db  # db のコンテナを先に起動する
+
+  frontend:
+    build:
+      context: ./frontend
+      # Dockerfile の ARG に渡す値（ビルドのときに埋め込まれる）
+      args:
+        # ブラウザから見た API の URL（ブラウザは Mac で動くので localhost。backend ではない）
+        NEXT_PUBLIC_API_URL: http://localhost:3001
+        NEXT_PUBLIC_APP_URL: http://localhost:3000
+        # ${…} は、compose.yaml と同じフォルダの .env から読む
+        NEXT_PUBLIC_COGNITO_DOMAIN: ${NEXT_PUBLIC_COGNITO_DOMAIN}
+        NEXT_PUBLIC_COGNITO_CLIENT_ID: ${NEXT_PUBLIC_COGNITO_CLIENT_ID}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  db-data:

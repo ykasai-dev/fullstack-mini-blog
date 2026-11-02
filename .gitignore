@@ -1,0 +1,26 @@
+# 依存パッケージ（npm install で作り直せる）
+node_modules/
+
+# ビルドの結果（npm run build で作り直せる）
+dist/
+.next/
+
+# Prisma が生成するクライアント（prisma generate で作り直せる。→ 3-2-7）
+backend/src/generated/
+
+# 秘密を含む設定ファイル（パスワードや、AWS の値が入る）
+.env
+.env.*
+# 例のファイル（キーだけを書いたもの）は git に入れる
+!.env.example
+
+# Terraform の作業ファイルと state（→ 4-1）
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# Mac が作るファイル
+.DS_Store
+
+# plan の保存ファイル
+*.tfplan

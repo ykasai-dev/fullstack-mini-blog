@@ -1,0 +1,7 @@
+# 手元の依存パッケージ（イメージの中で npm ci で入れ直す。Mac 用のファイルが入るのを防ぐ）
+node_modules
+# 手元のビルドの結果と、生成した Prisma Client（イメージの中で作り直す）
+dist
+src/generated
+# 秘密を含むファイル（値は compose から渡す。イメージに入れない）
+.env

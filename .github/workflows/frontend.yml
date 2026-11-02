@@ -1,0 +1,40 @@
+name: frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend.yml"
+      - ".github/workflows/_deploy.yml"
+  pull_request:
+    paths:
+      - "frontend/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04-arm
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: npm install -g npm@11
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build # 型チェックを兼ねる（NEXT_PUBLIC_ の値がなくてもビルドはできる）
+
+  deploy-dev:
+    if: github.event_name == 'push'
+    needs: test
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      env: dev
+      app: app # ECR・サービスの名前は mini-blog-dev-app

@@ -1,0 +1,126 @@
+name: deploy
+
+on:
+  workflow_call:
+    inputs:
+      env: # dev か prod
+        type: string
+        required: true
+      app: # api か app
+        type: string
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04-arm # ARM のランナーでビルドする（タスク定義の ARM64 と合わせる）
+    concurrency: deploy-${{ inputs.app }}-${{ inputs.env }} # 同じ環境へのデプロイを同時に実行しない
+    env:
+      AWS_REGION: us-east-1
+      NAME: mini-blog-${{ inputs.env }}-${{ inputs.app }} # ECR・サービス・タスク定義の名前（5-1）
+      CLUSTER: mini-blog-${{ inputs.env }}
+      CONTAINER: ${{ inputs.app }} # タスク定義の中のコンテナ名
+      SOURCE_DIR: ${{ inputs.app == 'api' && 'backend' || 'frontend' }}
+      IMAGE_TAG: ${{ github.sha }} # タグはコミットの SHA
+      # リポジトリの Variables から、環境（dev・prod）に合うものを選ぶ（5-2-3）
+      ROLE_ARN: ${{ inputs.env == 'prod' && vars.AWS_ROLE_ARN_PROD || vars.AWS_ROLE_ARN_DEV }}
+      NEXT_PUBLIC_API_URL: ${{ inputs.env == 'prod' && vars.NEXT_PUBLIC_API_URL_PROD || vars.NEXT_PUBLIC_API_URL_DEV }}
+      NEXT_PUBLIC_APP_URL: ${{ inputs.env == 'prod' && vars.NEXT_PUBLIC_APP_URL_PROD || vars.NEXT_PUBLIC_APP_URL_DEV }}
+      NEXT_PUBLIC_COGNITO_DOMAIN: ${{ inputs.env == 'prod' && vars.NEXT_PUBLIC_COGNITO_DOMAIN_PROD || vars.NEXT_PUBLIC_COGNITO_DOMAIN_DEV }}
+      NEXT_PUBLIC_COGNITO_CLIENT_ID: ${{ inputs.env == 'prod' && vars.NEXT_PUBLIC_COGNITO_CLIENT_ID_PROD || vars.NEXT_PUBLIC_COGNITO_CLIENT_ID_DEV }}
+    steps:
+      # 上の env: の形では、_PROD の Variables を入れ忘れると、エラーにならずに _DEV の値が使われる
+      # （例：prod の画面が dev の API を呼ぶ形でビルドされる）。そのため、最初に確かめて、足りなければ止める
+      - name: Variables を確かめる
+        env:
+          SUFFIX: ${{ inputs.env == 'prod' && 'PROD' || 'DEV' }}
+          ALL_VARS: ${{ toJSON(vars) }} # リポジトリの Variables の一覧（秘密ではない値だけ）
+        run: |
+          for KEY in AWS_ROLE_ARN NEXT_PUBLIC_API_URL NEXT_PUBLIC_APP_URL NEXT_PUBLIC_COGNITO_DOMAIN NEXT_PUBLIC_COGNITO_CLIENT_ID; do
+            VALUE=$(echo "$ALL_VARS" | jq -r --arg K "${KEY}_${SUFFIX}" '.[$K] // ""')
+            if [ -z "$VALUE" ]; then
+              echo "Variables の ${KEY}_${SUFFIX} がありません（→ 5-2-3・5-3-4）"
+              exit 1
+            fi
+          done
+
+      - uses: actions/checkout@v7
+
+      - name: AWS の認証情報を取得する（OIDC）
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }} # 環境ごとのロール（5-2-3）
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: ECR にログインする
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: イメージをビルドして push する
+        id: image
+        working-directory: ${{ env.SOURCE_DIR }}
+        run: |
+          IMAGE="${{ steps.ecr.outputs.registry }}/$NAME:$IMAGE_TAG"
+          # ジョブをやり直したときは、push 済みのイメージをそのまま使う
+          # （ECR は同じタグの上書きを禁止しているため、もう一度 push するとエラーになる）
+          if aws ecr describe-images --repository-name "$NAME" --image-ids imageTag="$IMAGE_TAG" > /dev/null 2>&1; then
+            echo "イメージは push 済みです：$IMAGE"
+          else
+            # NEXT_PUBLIC_ の値は画面のビルドでだけ使う（API の Dockerfile には ARG がないので使われない）
+            docker build -t "$IMAGE" \
+              --build-arg NEXT_PUBLIC_API_URL="$NEXT_PUBLIC_API_URL" \
+              --build-arg NEXT_PUBLIC_APP_URL="$NEXT_PUBLIC_APP_URL" \
+              --build-arg NEXT_PUBLIC_COGNITO_DOMAIN="$NEXT_PUBLIC_COGNITO_DOMAIN" \
+              --build-arg NEXT_PUBLIC_COGNITO_CLIENT_ID="$NEXT_PUBLIC_COGNITO_CLIENT_ID" \
+              .
+            docker push "$IMAGE"
+          fi
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: 新しいタスク定義を登録する
+        id: taskdef
+        run: |
+          # 今のタスク定義を取得し、イメージだけを新しいものに書き換える
+          # 登録するときに指定できない項目（ARN、リビジョンなど）は削除する
+          aws ecs describe-task-definition --task-definition "$NAME" \
+            --query taskDefinition --output json \
+          | jq --arg IMAGE "${{ steps.image.outputs.image }}" --arg C "$CONTAINER" '
+              del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy)
+              | .containerDefinitions |= map(if .name == $C then .image = $IMAGE else . end)
+            ' > task-definition.json
+          ARN=$(aws ecs register-task-definition --cli-input-json file://task-definition.json \
+                  --query taskDefinition.taskDefinitionArn --output text)
+          echo "arn=$ARN" >> "$GITHUB_OUTPUT"
+
+      - name: マイグレーションを実行する（API のみ・1回だけのタスク）
+        if: inputs.app == 'api'
+        run: |
+          # サービスと同じサブネット・セキュリティグループで起動する（RDS にアクセスできる場所。5-1-10 と同じ）
+          NETWORK=$(aws ecs describe-services --cluster "$CLUSTER" --services "$NAME" \
+                      --query 'services[0].networkConfiguration' --output json)
+          # 新しいタスク定義で、コマンドだけを prisma migrate deploy に変えて起動する
+          TASK_ARN=$(aws ecs run-task --cluster "$CLUSTER" \
+                      --task-definition "${{ steps.taskdef.outputs.arn }}" \
+                      --launch-type FARGATE \
+                      --network-configuration "$NETWORK" \
+                      --overrides "{\"containerOverrides\":[{\"name\":\"$CONTAINER\",\"command\":[\"npx\",\"prisma\",\"migrate\",\"deploy\"]}]}" \
+                      --query 'tasks[0].taskArn' --output text)
+          # タスクが終わるまで待ち、終了コードを確認する（0 以外なら失敗として止める）
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN"
+          EXIT_CODE=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" \
+                        --query "tasks[0].containers[?name=='$CONTAINER'].exitCode | [0]" --output text)
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "マイグレーションに失敗しました（exit code: $EXIT_CODE）。CloudWatch Logs を確認してください"
+            exit 1
+          fi
+
+      - name: サービスを新しいタスク定義に切り替える
+        run: |
+          aws ecs update-service --cluster "$CLUSTER" --service "$NAME" \
+            --task-definition "${{ steps.taskdef.outputs.arn }}" > /dev/null
+          # 新しいタスクが起動し、古いタスクが止まるまで待つ（最大 10分）
+          aws ecs wait services-stable --cluster "$CLUSTER" --services "$NAME"

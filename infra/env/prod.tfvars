@@ -1,0 +1,9 @@
+env                   = "prod"
+domain_name           = "example.com"         # dev と同じドメイン（prod は app.example.com・api.example.com）
+cognito_domain_prefix = "mini-blog-prod-xxxx" # dev とは別の文字にする
+alarm_email           = "you@example.com"
+log_retention_days    = 90 # 障害の調査や問い合わせへの対応に必要な期間
+api_desired_count     = 2  # AZ ごとに1つ（片方の AZ が止まっても動き続ける）
+app_desired_count     = 2
+deletion_protection   = true                       # RDS・ALB・Cognito を誤って削除できないようにする
+github_repository     = "OWNER@12345678/mini-blog" # dev と同じ（5-2-2）
